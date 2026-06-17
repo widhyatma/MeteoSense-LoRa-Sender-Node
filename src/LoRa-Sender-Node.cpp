@@ -9,7 +9,14 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <LoRa.h>
-#include <Adafruit_Sensor.h>
+#include <WiFi.h>
+#include <ArduinoOTA.h>
+
+//================ WIFI CONFIG ================
+const char* WIFI_SSID = "JERUKAGUNG SEISMOLOGI"; // Ganti dengan SSID Anda
+const char* WIFI_PASS = "JERIS6467";             // Ganti dengan Password WiFi
+
+void startOTAMode();
 
 #ifdef USE_SHT40
 #include <Adafruit_SHT4x.h>
@@ -119,7 +126,6 @@ NodeMeteo paketMeteo;
 //================ SETUP ================
 
 void setup() {
-  Serial.begin(115200);
   delay(1000);
 
   setCpuFrequencyMhz(80);
@@ -134,7 +140,6 @@ void setup() {
 #ifdef USE_SHT31
 
   if (!sht31.begin(0x45)) {
-    Serial.println("SHT31 ERROR");
     while (1);
   }
   sht31.reset();
@@ -145,7 +150,6 @@ void setup() {
 #ifdef USE_SHT40
 
   if (!sht4.begin()) {
-    Serial.println("SHT40 ERROR");
     while (1);
   }
 
@@ -159,7 +163,6 @@ void setup() {
 #ifdef USE_BMP280
 
   if (!bmp.begin(0x76)) {
-    Serial.println("BMP280 ERROR");
     while (1);
   }
 
@@ -177,14 +180,7 @@ void setup() {
 
 #ifdef USE_BH1750
 
-  bool bh1750_ok = lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23);
-
-  if (!bh1750_ok) {
-    Serial.println("BH1750 ERROR");
-  } else {
-    Serial.println("BH1750 OK");
-  }
-
+  lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23);
   delay(200);
 
 #endif
@@ -195,15 +191,12 @@ void setup() {
 
   dsSensors.begin();
 
-  Serial.print("DS18B20 FOUND: ");
-  Serial.println(dsSensors.getDeviceCount());
 
 #endif
 
   //================ MAX17048 ================
 
   if (!maxlipo.begin()) {
-    Serial.println("MAX17048 ERROR");
     while (1);
   }
 
@@ -260,7 +253,6 @@ void setup() {
 
   } else {
 
-    Serial.println("BH1750 NOT READY");
 
   }
 
@@ -284,7 +276,6 @@ void setup() {
   volt = maxlipo.cellVoltage();
   //================ LOW BATTERY MODE ================
   if ((volt * 100) <= 320) {
-    Serial.println("LOW BATTERY HIBERNATE");
     uint64_t TIME_TO_SLEEP_LOW_BAT = 600;
     esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_LOW_BAT * uS_TO_S_FACTOR);
     esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_OFF);
@@ -297,7 +288,6 @@ void setup() {
   //================ LORA INIT ================
   LoRa.setPins(ss, rst, dio0);
   while (!LoRa.begin(922E6)) {
-    Serial.println("LORA FAIL");
     delay(500);
   }
 
@@ -326,25 +316,12 @@ void setup() {
 
   //================ SERIAL DEBUG ================
 
-  Serial.println("===== SENSOR DATA =====");
 
-  Serial.print("TEMP : ");
-  Serial.println(tempi);
 
-  Serial.print("HUM  : ");
-  Serial.println(humi);
 
-  Serial.print("PRES : ");
-  Serial.println(press);
 
-  Serial.print("VOLT : ");
-  Serial.println(volt);
 
-  Serial.print("LUX  : ");
-  Serial.println(light);
 
-  Serial.print("SOIL : ");
-  Serial.println(soilTemp);
 
   //================ SEND LORA ================
 
@@ -359,6 +336,30 @@ void setup() {
 #ifdef USE_BMP280
   bmp.setSampling(Adafruit_BMP280::MODE_SLEEP);
 #endif
+
+  //================ TUNGGU PERINTAH OTA DARI GATEWAY ================
+  LoRa.receive();
+  unsigned long startListen = millis();
+  bool otaRequested = false;
+
+  while(millis() - startListen < 3000) {
+    int packetSize = LoRa.parsePacket();
+    if (packetSize) {
+      String incoming = "";
+      while (LoRa.available()) {
+        incoming += (char)LoRa.read();
+      }
+      if(incoming == "CMD:OTA") {
+        otaRequested = true;
+        break;
+      }
+    }
+  }
+
+  if (otaRequested) {
+    startOTAMode(); // Fungsi ini memiliki infinite loop, tidak akan lanjut ke bawah
+  }
+
   LoRa.sleep();
   //================ SLEEP ================
   digitalWrite(ledPin, LOW);
@@ -369,6 +370,26 @@ void setup() {
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_AUTO);
 
   esp_deep_sleep_start();
+}
+
+void startOTAMode() {
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+  }
+
+  // Set Hostname sesuai ID Node
+  String hostname = "MeteoSense-Node" + String(ID);
+  ArduinoOTA.setHostname(hostname.c_str());
+
+  ArduinoOTA.begin();
+
+  // Masuk ke infinite loop
+  while(true) {
+    ArduinoOTA.handle();
+    delay(10);
+  }
 }
 
 void loop() {}
