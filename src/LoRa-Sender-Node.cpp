@@ -12,11 +12,20 @@
 #include <WiFi.h>
 #include <ArduinoOTA.h>
 
+#ifndef ENABLE_LORA_OTA_TRIGGER
+#define ENABLE_LORA_OTA_TRIGGER 0
+#endif
+
 //================ WIFI CONFIG ================
 const char* WIFI_SSID = "JERUKAGUNG SEISMOLOGI"; // Ganti dengan SSID Anda
 const char* WIFI_PASS = "JERIS6467";             // Ganti dengan Password WiFi
 
+// Jeda mendengarkan sinyal OTA dari Gateway (dipersingkat dari 3000ms menjadi 800ms)
+const unsigned long OTA_LISTEN_WINDOW_MS = 800;
+
+#if ENABLE_LORA_OTA_TRIGGER
 void startOTAMode();
+#endif
 
 #ifdef USE_SHT40
 #include <Adafruit_SHT4x.h>
@@ -313,16 +322,6 @@ void setup() {
   paketAgro.temp_ds = isnan(soilTemp) ? 0 : soilTemp * 100;
 
 #endif
-
-  //================ SERIAL DEBUG ================
-
-
-
-
-
-
-
-
   //================ SEND LORA ================
 
   LoRa.beginPacket();
@@ -337,19 +336,20 @@ void setup() {
   bmp.setSampling(Adafruit_BMP280::MODE_SLEEP);
 #endif
 
-  //================ TUNGGU PERINTAH OTA DARI GATEWAY ================
+  //================ TUNGGU PERINTAH OTA DARI GATEWAY (FAST WINDOW) ================
+#if ENABLE_LORA_OTA_TRIGGER
   LoRa.receive();
   unsigned long startListen = millis();
   bool otaRequested = false;
 
-  while(millis() - startListen < 3000) {
+  while (millis() - startListen < OTA_LISTEN_WINDOW_MS) {
     int packetSize = LoRa.parsePacket();
     if (packetSize) {
       String incoming = "";
       while (LoRa.available()) {
         incoming += (char)LoRa.read();
       }
-      if(incoming == "CMD:OTA") {
+      if (incoming == "CMD:OTA") {
         otaRequested = true;
         break;
       }
@@ -357,8 +357,9 @@ void setup() {
   }
 
   if (otaRequested) {
-    startOTAMode(); // Fungsi ini memiliki infinite loop, tidak akan lanjut ke bawah
+    startOTAMode(); // Masuk ke mode OTA jika diminta gateway
   }
+#endif
 
   LoRa.sleep();
   //================ SLEEP ================
@@ -372,24 +373,59 @@ void setup() {
   esp_deep_sleep_start();
 }
 
+#if ENABLE_LORA_OTA_TRIGGER
 void startOTAMode() {
+  digitalWrite(ledPin, HIGH);
+
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+
+  // Koneksi WiFi dengan timeout 15 detik agar baterai tidak terkuras jika WiFi offline
+  unsigned long startWifi = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startWifi < 15000) {
+    delay(200);
   }
 
-  // Set Hostname sesuai ID Node
+  // Jika WiFi gagal terhubung, batalkan OTA dan kembali tidur
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    digitalWrite(ledPin, LOW);
+    LoRa.sleep();
+    esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+    esp_deep_sleep_start();
+    return;
+  }
+
+  // Kirim feedback balasan IP ke Gateway via LoRa
+  String ipStr = WiFi.localIP().toString();
+  String ackStr = "OTA_READY_IP:" + ipStr;
+  LoRa.beginPacket();
+  LoRa.print(ackStr);
+  LoRa.endPacket();
+
+  // Konfigurasi ArduinoOTA
   String hostname = "MeteoSense-Node" + String(ID);
   ArduinoOTA.setHostname(hostname.c_str());
 
   ArduinoOTA.begin();
 
-  // Masuk ke infinite loop
-  while(true) {
+  // Loop penanganan OTA dengan Safety Timeout (maks 3 menit)
+  // Jika tidak ada proses upload baru dalam 3 menit, node otomatis kembali deep sleep
+  unsigned long otaTimeout = millis() + 180000UL;
+  while (millis() < otaTimeout) {
     ArduinoOTA.handle();
     delay(10);
   }
+
+  // Timeout selesai tanpa upload, bersihkan dan masuk sleep
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  digitalWrite(ledPin, LOW);
+  LoRa.sleep();
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  esp_deep_sleep_start();
 }
+#endif
 
 void loop() {}
