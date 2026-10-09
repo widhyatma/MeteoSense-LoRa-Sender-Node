@@ -133,48 +133,36 @@ NodeMeteo paketMeteo;
 #endif
 
 //================ SETUP ================
-
 void setup() {
   delay(1000);
-
   setCpuFrequencyMhz(80);
-
   pinMode(ledPin, OUTPUT);
   digitalWrite(ledPin, HIGH);
-
   Wire.begin();
   Wire.setClock(100000);
-  //================ SHT31 ================
 
+//================ SHT31 ================
 #ifdef USE_SHT31
-
   if (!sht31.begin(0x45)) {
     while (1);
   }
   sht31.reset();
 #endif
 
-  //================ SHT40 ================
-
+//================ SHT40 ================
 #ifdef USE_SHT40
-
   if (!sht4.begin()) {
     while (1);
   }
-
   sht4.setPrecision(SHT4X_HIGH_PRECISION);
   sht4.setHeater(SHT4X_NO_HEATER);
-
 #endif
 
-  //================ BMP280 ================
-
+//================ BMP280 ================
 #ifdef USE_BMP280
-
   if (!bmp.begin(0x76)) {
     while (1);
   }
-
   bmp.setSampling(
     Adafruit_BMP280::MODE_NORMAL,
     Adafruit_BMP280::SAMPLING_X2,
@@ -182,109 +170,73 @@ void setup() {
     Adafruit_BMP280::FILTER_X16,
     Adafruit_BMP280::STANDBY_MS_500
   );
-
 #endif
 
-  //================ BH1750 ================
-
+//================ BH1750 ================
 #ifdef USE_BH1750
-
   lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23);
   delay(200);
-
 #endif
 
-  //================ DS18B20 ================
-
+//================ DS18B20 ================
 #ifdef USE_DS18B20
-
   dsSensors.begin();
-
-
 #endif
 
-  //================ MAX17048 ================
-
-  if (!maxlipo.begin()) {
+//================ MAX17048 ================
+if (!maxlipo.begin()) {
     while (1);
   }
-
   maxlipo.setAlertVoltages(2.0, 4.2);
-
-  //================ READ SENSOR ================
-
+//================ READ SENSOR ================
   float tempi = NAN;
   float humi = NAN;
   float press = NAN;
   float volt = NAN;
   float light = 0;
   float soilTemp = NAN;
-
-  //================ SHT31 READ ================
-
+//================ SHT31 READ ================
 #ifdef USE_SHT31
   sht31.readBoth(&tempi, &humi);
   sht31.heater(false);
 #endif
 
-  //================ SHT40 READ ================
-
+//================ SHT40 READ ================
 #ifdef USE_SHT40
-
   sensors_event_t humidityEvent, tempEvent;
-
   sht4.getEvent(&humidityEvent, &tempEvent);
-
   tempi = tempEvent.temperature;
   humi = humidityEvent.relative_humidity;
-
 #endif
 
-  //================ BMP280 READ ================
-
+//================ BMP280 READ ================
 #ifdef USE_BMP280
-
   press = bmp.readPressure() / 100.0F;
-
 #endif
 
-  //================ BH1750 READ ================
-
+//================ BH1750 READ ================
 #ifdef USE_BH1750
-
   if (lightMeter.measurementReady()) {
-
     light = lightMeter.readLightLevel();
-
     if (light < 0 || isnan(light)) {
       light = 0;
     }
-
-  } else {
-
-
   }
-
 #endif
 
-  //================ DS18B20 READ ================
-
+//================ DS18B20 READ ================
 #ifdef USE_DS18B20
-
   dsSensors.requestTemperatures();
-
   float t = dsSensors.getTempCByIndex(0);
-
   if (t != DEVICE_DISCONNECTED_C) {
     soilTemp = t;
   }
-
 #endif
 
-  //================ BATTERY READ ================
-  volt = maxlipo.cellVoltage();
-  //================ LOW BATTERY MODE ================
-  if ((volt * 100) <= 320) {
+//================ BATTERY READ ================
+volt = maxlipo.cellVoltage();
+//================ LOW BATTERY MODE ================
+if ((volt * 100) <= 320) {
     uint64_t TIME_TO_SLEEP_LOW_BAT = 600;
     esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_LOW_BAT * uS_TO_S_FACTOR);
     esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_OFF);
